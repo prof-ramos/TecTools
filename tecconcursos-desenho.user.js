@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TecConcursos - Desenho Livre sobre Questões
 // @namespace    https://tecconcursos.com.br/
-// @version      2.0
+// @version      2.1
 // @description  Permite desenhar à mão livre (grifar/riscar) sobre a questão. Anotações somem ao trocar de questão.
 // @author       Você
 // @match        https://www.tecconcursos.com.br/questoes/*
@@ -20,6 +20,7 @@
         strokeColor: 'rgba(220, 50, 50, 0.72)',  // cor do traço (rgba)
         lineWidth: 4,                            // espessura inicial (px)
         zIndex: 99998,                           // z-index do canvas
+        maxHistory: 20,                          // máximo de estados para desfazer
         // Seletores CSS — altere somente se o site mudar a estrutura
         selArticle: 'article.questao-enunciado',
         selIdInput: '.questao-rg-area-coluna-1 input[type="hidden"]',
@@ -28,14 +29,18 @@
     // ══════════════════════════════════════════════════════════
     //  ESTADO INTERNO
     // ══════════════════════════════════════════════════════════
-    let canvas = null;     // elemento <canvas>
-    let ctx = null;        // contexto 2D
-    let panel = null;      // painel flutuante
-    let observer = null;   // MutationObserver
-    let drawMode = false;  // modo desenho ativo?
-    let isDrawing = false; // botão do mouse pressionado?
-    let currentQId = null; // ID da questão atual
+    let canvas = null;         // elemento <canvas>
+    let ctx = null;            // contexto 2D
+    let panel = null;          // painel flutuante
+    let observer = null;       // MutationObserver
+    let drawMode = false;      // modo desenho ativo?
+    let isDrawing = false;     // botão do mouse pressionado?
+    let eraserMode = false;    // modo borracha ativo?
+    let currentQId = null;     // ID da questão atual
     let resizeTimer = null;
+    let history = [];          // histórico para desfazer
+    let historyStep = -1;      // posição atual no histórico
+    let touchIndicator = null; // indicador visual para touch
 
     // ══════════════════════════════════════════════════════════
     //  UTILITÁRIOS
@@ -43,32 +48,106 @@
     const getArticle = () => document.querySelector(CFG.selArticle);
     const getQId = () => document.querySelector(CFG.selIdInput)?.value ?? null;
 
-    /** Aplica o estilo de traço ao ctx (necessário após resize que limpa o canvas) */
+    /** Salva estado atual no histórico */
+    function saveToHistory() {
+        if (!canvas) return;
+        // Remover estados futuros se estamos no meio do histórico
+        if (historyStep < history.length - 1) {
+            history = history.slice(0, historyStep + 1);
+        }
+        // Salvar snapshot
+        history.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        // Limitar tamanho do histórico
+        if (history.length > CFG.maxHistory) {
+            history.shift();
+        } else {
+            historyStep++;
+        }
+        updateUndoButton();
+    }
+
+    /** Desfaz última ação */
+    function undo() {
+        if (historyStep > 0) {
+            historyStep--;
+            ctx.putImageData(history[historyStep], 0, 0);
+            updateUndoButton();
+        }
+    }
+
+    /** Atualiza estado do botão desfazer */
+    function updateUndoButton() {
+        const btn = document.getElementById('tcc-btn-undo');
+        if (btn) {
+            btn.disabled = historyStep <= 0;
+            btn.style.opacity = historyStep <= 0 ? '0.5' : '1';
+        }
+    }
+
+    /** Aplica o estilo de traço ao ctx */
     function applyCtxStyle() {
         if (!ctx) return;
-        ctx.strokeStyle = CFG.strokeColor;
-        ctx.lineWidth = parseInt(document.getElementById('tcc-slider')?.value ?? CFG.lineWidth);
+        if (eraserMode) {
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.lineWidth = parseInt(document.getElementById('tcc-slider')?.value ?? CFG.lineWidth * 2);
+        } else {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeStyle = CFG.strokeColor;
+            ctx.lineWidth = parseInt(document.getElementById('tcc-slider')?.value ?? CFG.lineWidth);
+        }
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
     }
 
-    /** Posiciona e redimensiona o canvas para cobrir o article */
+    /** Posiciona e redimensiona o canvas */
     function positionCanvas() {
         const article = getArticle();
         if (!article || !canvas) return;
         const bcr = article.getBoundingClientRect();
         const w = Math.round(bcr.width);
         const h = Math.round(bcr.height);
-        // Atualiza posição (position:fixed acompanha a viewport)
         canvas.style.top = bcr.top + 'px';
         canvas.style.left = bcr.left + 'px';
-        // Só redimensiona se necessário (limpa o conteúdo, evitável p/ pequenas variações)
         if (canvas.width !== w || canvas.height !== h) {
             canvas.width = w;
             canvas.height = h;
             canvas.style.width = w + 'px';
             canvas.style.height = h + 'px';
-            applyCtxStyle();   // ctx é resetado ao mudar width/height
+            applyCtxStyle();
+            // Limpar histórico após resize (dimensões mudaram)
+            history = [];
+            historyStep = -1;
+        }
+    }
+
+    /** Mostra indicador visual no touch */
+    function showTouchIndicator(x, y) {
+        if (!touchIndicator) {
+            touchIndicator = document.createElement('div');
+            touchIndicator.id = 'tcc-touch-indicator';
+            touchIndicator.style.cssText = `
+                position: fixed;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background: rgba(220, 50, 50, 0.3);
+                border: 2px solid rgba(220, 50, 50, 0.6);
+                pointer-events: none;
+                z-index: ${CFG.zIndex + 2};
+                transform: translate(-50%, -50%);
+                transition: opacity 0.1s;
+            `;
+            document.body.appendChild(touchIndicator);
+        }
+        touchIndicator.style.left = x + 'px';
+        touchIndicator.style.top = y + 'px';
+        touchIndicator.style.opacity = '1';
+    }
+
+    /** Esconde indicador visual */
+    function hideTouchIndicator() {
+        if (touchIndicator) {
+            touchIndicator.style.opacity = '0';
         }
     }
 
@@ -91,19 +170,22 @@
             width: Math.round(bcr.width) + 'px',
             height: Math.round(bcr.height) + 'px',
             zIndex: String(CFG.zIndex),
-            pointerEvents: 'none',   // desligado por padrão
-            cursor: 'crosshair',
+            pointerEvents: 'none',
+            cursor: eraserMode ? 'cell' : 'crosshair',
             boxSizing: 'border-box',
         });
         document.body.appendChild(canvas);
         ctx = canvas.getContext('2d');
         applyCtxStyle();
-        // ── Eventos mouse ──────────────────────────────────────
+        // Inicializar histórico
+        history = [];
+        historyStep = -1;
+        saveToHistory();
+        // Eventos
         canvas.addEventListener('mousedown', onDown);
         canvas.addEventListener('mousemove', onMove);
         canvas.addEventListener('mouseup', onUp);
         canvas.addEventListener('mouseleave', onUp);
-        // ── Eventos touch ──────────────────────────────────────
         canvas.addEventListener('touchstart', onTouchDown, { passive: false });
         canvas.addEventListener('touchmove', onTouchMove, { passive: false });
         canvas.addEventListener('touchend', onUp);
@@ -134,6 +216,8 @@
                 font-size: 12px;
                 user-select: none;
                 min-width: 130px;
+                max-height: 80vh;
+                overflow-y: auto;
             }
             #tcc-draw-panel button {
                 background: #3a3a4e;
@@ -147,7 +231,9 @@
                 font-size: 12px;
             }
             #tcc-draw-panel button:hover { filter: brightness(1.2); }
+            #tcc-draw-panel button:disabled { opacity: 0.5; cursor: not-allowed; }
             #tcc-btn-toggle.on { background: #27ae60 !important; }
+            #tcc-btn-eraser.active { background: #e74c3c !important; }
             #tcc-draw-panel input[type=color] {
                 width: 100%; height: 24px;
                 border: none; border-radius: 4px;
@@ -159,17 +245,52 @@
             #tcc-draw-panel .tcc-label {
                 color: #aaa; font-size: 11px;
             }
+            #tcc-draw-panel .tcc-shortcuts {
+                color: #888;
+                font-size: 10px;
+                border-top: 1px solid #444;
+                padding-top: 6px;
+                margin-top: 4px;
+            }
         `);
-        // ── Botão toggle ───────────────────────────────────────
+        // Botão toggle
         const btnToggle = document.createElement('button');
         btnToggle.id = 'tcc-btn-toggle';
         btnToggle.textContent = '✏️ Desenho OFF';
         btnToggle.addEventListener('click', toggleDrawMode);
-        // ── Botão limpar ───────────────────────────────────────
+        // Botão limpar
         const btnClear = document.createElement('button');
         btnClear.textContent = '🗑️ Limpar';
-        btnClear.addEventListener('click', clearCanvas);
-        // ── Seletor de cor ─────────────────────────────────────
+        btnClear.addEventListener('click', () => {
+            clearCanvas();
+            saveToHistory();
+        });
+        // Botão desfazer
+        const btnUndo = document.createElement('button');
+        btnUndo.id = 'tcc-btn-undo';
+        btnUndo.textContent = '↩️ Desfazer (Ctrl+Z)';
+        btnUndo.addEventListener('click', undo);
+        // Botão borracha
+        const btnEraser = document.createElement('button');
+        btnEraser.id = 'tcc-btn-eraser';
+        btnEraser.textContent = '🧽 Borracha (E)';
+        btnEraser.addEventListener('click', toggleEraser);
+        // Checkbox persistência
+        const persistContainer = document.createElement('div');
+        persistContainer.style.cssText = 'display: flex; align-items: center; gap: 6px; color: #aaa; font-size: 11px;';
+        const persistCheckbox = document.createElement('input');
+        persistCheckbox.type = 'checkbox';
+        persistCheckbox.id = 'tcc-persist';
+        persistCheckbox.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                saveToLocalStorage();
+            }
+        });
+        const persistLabel = document.createElement('label');
+        persistLabel.htmlFor = 'tcc-persist';
+        persistLabel.textContent = 'Manter anotações';
+        persistContainer.append(persistCheckbox, persistLabel);
+        // Seletor de cor
         const colorPicker = document.createElement('input');
         colorPicker.type = 'color';
         colorPicker.value = '#dc3232';
@@ -177,9 +298,9 @@
         colorPicker.addEventListener('input', (e) => {
             const { r, g, b } = hexToRgb(e.target.value);
             CFG.strokeColor = `rgba(${r},${g},${b},0.72)`;
-            if (ctx) ctx.strokeStyle = CFG.strokeColor;
+            if (ctx && !eraserMode) ctx.strokeStyle = CFG.strokeColor;
         });
-        // ── Slider espessura ───────────────────────────────────
+        // Slider espessura
         const label = document.createElement('span');
         label.className = 'tcc-label';
         label.textContent = `Espessura: ${CFG.lineWidth}px`;
@@ -193,8 +314,37 @@
             if (ctx) ctx.lineWidth = parseInt(e.target.value);
             label.textContent = `Espessura: ${e.target.value}px`;
         });
-        panel.append(btnToggle, btnClear, colorPicker, label, slider);
+        // Atalhos
+        const shortcuts = document.createElement('div');
+        shortcuts.className = 'tcc-shortcuts';
+        shortcuts.innerHTML = '⌨️ D: Toggle | C: Limpar | E: Borracha | Ctrl+Z: Desfazer';
+        panel.append(btnToggle, btnUndo, btnEraser, btnClear, persistContainer, colorPicker, label, slider, shortcuts);
         document.body.appendChild(panel);
+        updateUndoButton();
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  PERSISTÊNCIA LOCAL
+    // ══════════════════════════════════════════════════════════
+    function saveToLocalStorage() {
+        const qId = getQId();
+        if (!qId || !canvas) return;
+        const dataUrl = canvas.toDataURL();
+        localStorage.setItem(`tcc-draw-${qId}`, dataUrl);
+    }
+
+    function loadFromLocalStorage() {
+        const qId = getQId();
+        if (!qId || !canvas) return;
+        const dataUrl = localStorage.getItem(`tcc-draw-${qId}`);
+        if (dataUrl) {
+            const img = new Image();
+            img.onload = () => {
+                ctx.drawImage(img, 0, 0);
+                saveToHistory();
+            };
+            img.src = dataUrl;
+        }
     }
 
     // ══════════════════════════════════════════════════════════
@@ -212,6 +362,20 @@
             if (btn) { btn.textContent = '✏️ Desenho OFF'; btn.classList.remove('on'); }
         }
     }
+
+    function toggleEraser() {
+        eraserMode = !eraserMode;
+        const btn = document.getElementById('tcc-btn-eraser');
+        if (eraserMode) {
+            btn.classList.add('active');
+            if (canvas) canvas.style.cursor = 'cell';
+        } else {
+            btn.classList.remove('active');
+            if (canvas) canvas.style.cursor = 'crosshair';
+        }
+        applyCtxStyle();
+    }
+
     function clearCanvas() {
         if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
@@ -226,6 +390,7 @@
             y: (clientY - bcr.top) * (canvas.height / bcr.height),
         };
     }
+
     function onDown(e) {
         if (!drawMode) return;
         isDrawing = true;
@@ -234,6 +399,7 @@
         ctx.moveTo(p.x, p.y);
         e.preventDefault();
     }
+
     function onMove(e) {
         if (!drawMode || !isDrawing) return;
         const p = canvasPoint(e.clientX, e.clientY);
@@ -243,8 +409,17 @@
         ctx.moveTo(p.x, p.y);
         e.preventDefault();
     }
+
     function onUp() {
-        if (isDrawing) { ctx.closePath(); isDrawing = false; }
+        if (isDrawing) {
+            ctx.closePath();
+            isDrawing = false;
+            saveToHistory();
+            // Salvar no localStorage se habilitado
+            if (document.getElementById('tcc-persist')?.checked) {
+                saveToLocalStorage();
+            }
+        }
     }
 
     // ══════════════════════════════════════════════════════════
@@ -257,8 +432,10 @@
         const p = canvasPoint(t.clientX, t.clientY);
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
+        showTouchIndicator(t.clientX, t.clientY);
         e.preventDefault();
     }
+
     function onTouchMove(e) {
         if (!drawMode || !isDrawing || !e.touches[0]) return;
         const t = e.touches[0];
@@ -267,8 +444,32 @@
         ctx.stroke();
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
+        showTouchIndicator(t.clientX, t.clientY);
         e.preventDefault();
     }
+
+    // ══════════════════════════════════════════════════════════
+    //  ATALHOS DE TECLADO
+    // ══════════════════════════════════════════════════════════
+    document.addEventListener('keydown', (e) => {
+        // Ignorar se está em input/textarea
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+        if (e.key === 'd' || e.key === 'D') {
+            e.preventDefault();
+            toggleDrawMode();
+        } else if (e.key === 'c' || e.key === 'C') {
+            e.preventDefault();
+            clearCanvas();
+            saveToHistory();
+        } else if (e.key === 'e' || e.key === 'E') {
+            e.preventDefault();
+            toggleEraser();
+        } else if (e.ctrlKey && e.key === 'z') {
+            e.preventDefault();
+            undo();
+        }
+    });
 
     // ══════════════════════════════════════════════════════════
     //  SCROLL / RESIZE
@@ -280,7 +481,7 @@
     }, { passive: true });
 
     // ══════════════════════════════════════════════════════════
-    //  DETECÇÃO DE TROCA DE QUESTÃO (MutationObserver)
+    //  DETECÇÃO DE TROCA DE QUESTÃO
     // ══════════════════════════════════════════════════════════
     function setupObserver() {
         const article = getArticle();
@@ -292,17 +493,19 @@
             if (!newId || newId === currentQId) return;
             currentQId = newId;
             const wasOn = drawMode;
-            // Recriar canvas limpo para nova questão
+            const persistEnabled = document.getElementById('tcc-persist')?.checked;
             if (wasOn) drawMode = false;
             createCanvas();
-            // Restaurar modo desenho se estava ativo
+            // Carregar do localStorage se habilitado
+            if (persistEnabled) {
+                loadFromLocalStorage();
+            }
             if (wasOn) {
                 drawMode = true;
                 if (canvas) canvas.style.pointerEvents = 'auto';
                 const btn = document.getElementById('tcc-btn-toggle');
                 if (btn) { btn.textContent = '✏️ Desenho ON'; btn.classList.add('on'); }
             }
-            // Reobservar (mesmo article, conteúdo novo)
             observer.observe(article, { childList: true, subtree: true });
         });
         observer.observe(article, { childList: true, subtree: true });
@@ -326,10 +529,9 @@
         createCanvas();
         createPanel();
         setupObserver();
-        console.log('[TCC-DRAW] Iniciado. Questão:', currentQId);
+        console.log('[TCC-DRAW v2.1] Iniciado com 5 novas features! Questão:', currentQId);
     }
 
-    // Aguardar o article existir (SPA pode carregar depois do DOM)
     if (getArticle()) {
         init();
     } else {
