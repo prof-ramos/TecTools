@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         TecConcursos - Desenho Livre sobre Questões
 // @namespace    https://tecconcursos.com.br/
-// @version      2.1
-// @description  Permite desenhar à mão livre (grifar/riscar) sobre a questão. Anotações somem ao trocar de questão.
+// @version      2.2
+// @description  Permite desenhar à mão livre (grifar/riscar) sobre a questão. Anotações somem ao trocar de questão. v2.2: correções críticas.
 // @author       Você
 // @match        https://www.tecconcursos.com.br/questoes/*
 // @match        https://www.tecconcursos.com.br/questoes/cadernos/*
@@ -117,6 +117,7 @@
             // Limpar histórico após resize (dimensões mudaram)
             history = [];
             historyStep = -1;
+            updateUndoButton();   // Atualizar botão desfazer
         }
     }
 
@@ -329,8 +330,17 @@
     function saveToLocalStorage() {
         const qId = getQId();
         if (!qId || !canvas) return;
-        const dataUrl = canvas.toDataURL();
-        localStorage.setItem(`tcc-draw-${qId}`, dataUrl);
+        try {
+            const dataUrl = canvas.toDataURL();
+            localStorage.setItem(`tcc-draw-${qId}`, dataUrl);
+        } catch (e) {
+            // Silenciar erro de quota ou avisar o usuário via console
+            if (e.name === 'QuotaExceededError') {
+                console.warn('[TCC-DRAW] localStorage cheio. Anotações não serão salvas.');
+            } else {
+                console.error('[TCC-DRAW] Erro ao salvar:', e);
+            }
+        }
     }
 
     function loadFromLocalStorage() {
@@ -340,8 +350,17 @@
         if (dataUrl) {
             const img = new Image();
             img.onload = () => {
-                ctx.drawImage(img, 0, 0);
-                saveToHistory();
+                // Validar dimensões antes de desenhar
+                if (img.width === canvas.width && img.height === canvas.height) {
+                    ctx.drawImage(img, 0, 0);
+                    saveToHistory();
+                } else {
+                    // Dimensões não batem: recusar carregar, inicializar histórico vazio
+                    console.warn('[TCC-DRAW] Dimensões da imagem salva diferem do canvas atual.',
+                        `Salvas: ${img.width}x${img.height}, Atual: ${canvas.width}x${canvas.height}`,
+                        'Anotações não foram carregadas para evitar distorção.');
+                    saveToHistory();  // Inicializa histórico vazio para desfazer funcionar
+                }
             };
             img.src = dataUrl;
         }
@@ -529,7 +548,7 @@
         createCanvas();
         createPanel();
         setupObserver();
-        console.log('[TCC-DRAW v2.1] Iniciado com 5 novas features! Questão:', currentQId);
+        console.log('[TCC-DRAW v2.2] Correções críticas aplicadas. Questão:', currentQId);
     }
 
     if (getArticle()) {
