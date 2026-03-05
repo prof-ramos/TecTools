@@ -50,7 +50,7 @@
 
     /** Salva estado atual no histórico */
     function saveToHistory() {
-        if (!canvas) return;
+        if (!canvas || canvas.width === 0 || canvas.height === 0) return;
         // Remover estados futuros se estamos no meio do histórico
         if (historyStep < history.length - 1) {
             history = history.slice(0, historyStep + 1);
@@ -433,6 +433,7 @@
         if (isDrawing) {
             ctx.closePath();
             isDrawing = false;
+            hideTouchIndicator();
             saveToHistory();
             // Salvar no localStorage se habilitado
             if (document.getElementById('tcc-persist')?.checked) {
@@ -484,7 +485,7 @@
         } else if (e.key === 'e' || e.key === 'E') {
             e.preventDefault();
             toggleEraser();
-        } else if (e.ctrlKey && e.key === 'z') {
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
             e.preventDefault();
             undo();
         }
