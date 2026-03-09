@@ -1,0 +1,8 @@
+# OMC Runtime State
+.omc/state/
+
+# OMC Project Memory (machine-specific)
+.omc/project-memory.json
+
+# Repomix Output
+repomix-output.xml

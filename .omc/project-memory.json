@@ -1,0 +1,53 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1772679914486,
+  "projectRoot": ".",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {},
+  "hotPaths": [
+    {
+      "path": "tecconcursos-desenho.user.js",
+      "accessCount": 25,
+      "lastAccessed": 1772681559241,
+      "type": "file"
+    },
+    {
+      "path": ".",
+      "accessCount": 7,
+      "lastAccessed": 1772681154004,
+      "type": "directory"
+    },
+    {
+      "path": "analisecoderabbit_debug.md",
+      "accessCount": 4,
+      "lastAccessed": 1772681339903,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}
