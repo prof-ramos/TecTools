@@ -1,6 +1,5 @@
 # OMC Runtime State
 .omc/state/
-.omc/state/**
 
 # OMC Project Memory (machine-specific)
 .omc/project-memory.json

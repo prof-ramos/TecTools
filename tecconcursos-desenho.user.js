@@ -526,7 +526,6 @@
                 const btn = document.getElementById('tcc-btn-toggle');
                 if (btn) { btn.textContent = '✏️ Desenho ON'; btn.classList.add('on'); }
             }
-            observer.observe(article, { childList: true, subtree: true });
         });
         observer.observe(article, { childList: true, subtree: true });
     }

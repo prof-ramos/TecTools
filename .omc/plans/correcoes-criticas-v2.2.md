@@ -2,7 +2,7 @@
 
 **Data:** 2026-03-03 (Revisado após 2º feedback do Architect)
 **Versão:** v2.1 → v2.2 (patch increment)
-**Arquivo:** `/Users/gabrielramos/TecTools/tecconcursos-desenho.user.js`
+**Arquivo:** `./tecconcursos-desenho.user.js`
 
 ---
 
