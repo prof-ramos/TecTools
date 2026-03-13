@@ -1,0 +1,15 @@
+{
+  "name": "tectools-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Testes E2E para o TecConcursos Desenho Livre",
+  "engines": {
+    "node": ">=16"
+  },
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.1"
+  }
+}
